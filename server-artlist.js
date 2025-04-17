@@ -1,7 +1,6 @@
 import express from 'express';
 import puppeteer from 'puppeteer';
 import Tesseract from 'tesseract.js';
-import Xvfb from 'xvfb';
 
 const app = express();
 const PORT = 3000;
@@ -9,10 +8,6 @@ const PORT = 3000;
 const requestQueue = [];
 let isProcessing = false;
 let browser; // Tạo browser global để tái sử dụng
-
-// Khởi động Xvfb trước khi chạy Puppeteer
-const xvfb = new Xvfb();
-xvfb.startSync(); // Bắt đầu Xvfb đồng bộ
 
 // Hàng đợi xử lý tuần tự
 async function processQueue() {
@@ -40,8 +35,6 @@ async function initializeBrowser() {
         '--start-maximized',
         '--no-sandbox',  // Thêm tham số này để tránh lỗi khi chạy dưới quyền root
         '--disable-setuid-sandbox', // Thêm tham số này nếu cần thiết
-        '--disable-gpu', // Tắt GPU nếu cần thiết
-        '--remote-debugging-port=9222', // Nếu muốn remote debug
       ],
     });
     console.log('🚀 Puppeteer đã sẵn sàng');
