@@ -1,11 +1,13 @@
 import express from 'express';
 import puppeteer from 'puppeteer';
+import Tesseract from 'tesseract.js';
 
 const app = express();
 const PORT = 3000;
 
 const requestQueue = [];
 let isProcessing = false;
+let browser; // Tạo browser global để tái sử dụng
 
 // Hàng đợi xử lý tuần tự
 async function processQueue() {
@@ -24,6 +26,21 @@ async function processQueue() {
   }
 }
 
+// Tạo trình duyệt chỉ khi có yêu cầu đầu tiên
+async function initializeBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: true,  // Chạy không có giao diện người dùng
+      args: [
+        '--start-maximized',
+        '--no-sandbox',  // Thêm tham số này để tránh lỗi khi chạy dưới quyền root
+        '--disable-setuid-sandbox', // Thêm tham số này nếu cần thiết
+      ],
+    });
+    console.log('🚀 Puppeteer đã sẵn sàng');
+  }
+}
+
 // Route API
 app.get('/api.artlist', (req, res) => {
   const artlistUrl = req.query.url;
@@ -33,7 +50,7 @@ app.get('/api.artlist', (req, res) => {
   }
 
   requestQueue.push({ artlistUrl, res });
-  processQueue();
+  processQueue(); // Xử lý các truy vấn theo hàng đợi
 });
 
 // Hàm xử lý một request Artlist
@@ -41,10 +58,8 @@ async function handleArtlistRequest(artlistUrl, res) {
   console.log('\n===============================');
   console.log('🚀 Bắt đầu xử lý URL:', artlistUrl);
 
-  const browser = await puppeteer.launch({
-    headless: false,
-    args: ['--start-maximized'],
-  });
+  // Khởi tạo trình duyệt nếu chưa có
+  await initializeBrowser();
 
   const page = await browser.newPage();
   await page.setViewport({
@@ -61,7 +76,7 @@ async function handleArtlistRequest(artlistUrl, res) {
     const url = request.url();
     if (url.includes('.aac')) {
       console.log('🎵 Bắt được request .aac:', url);
-      if (!mediaUrl) mediaUrl = url;
+      if (!mediaUrl) mediaUrl = url; // Lấy mediaUrl đầu tiên gặp phải
     }
     request.continue();
   });
@@ -76,6 +91,8 @@ async function handleArtlistRequest(artlistUrl, res) {
     const clicked = await page.evaluate(() => {
       const firstPlayBtn = document.querySelector('button[aria-label="play global player"]');
       if (firstPlayBtn) {
+        // Giả lập sự kiện hover trước khi click
+        firstPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         firstPlayBtn.click();
         return '▶️ Clicked nút Play (aria-label)';
       }
@@ -83,6 +100,8 @@ async function handleArtlistRequest(artlistUrl, res) {
       const allButtons = [...document.querySelectorAll('button[data-testid="renderButton"]')];
       const secondPlayBtn = allButtons.find(btn => btn.innerText.trim().toLowerCase() === 'play');
       if (secondPlayBtn) {
+        // Giả lập sự kiện hover trước khi click
+        secondPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         secondPlayBtn.click();
         return '▶️ Clicked nút Play (data-testid)';
       }
@@ -91,23 +110,45 @@ async function handleArtlistRequest(artlistUrl, res) {
     });
 
     console.log(clicked);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Đợi vài giây để video bắt đầu phát
 
     if (mediaUrl) {
       console.log('✅ Media URL:', mediaUrl);
-      return res.json({ mediaLink: mediaUrl });
+
+      // Nếu muốn dùng OCR để nhận dạng văn bản trong ảnh (ví dụ ảnh chứa captcha, nút, v.v.)
+      const text = await runOCR(mediaUrl);
+      console.log('✅ Kết quả OCR:', text);
+
+      return res.json({ mediaLink: mediaUrl, ocrResult: text });
     } else {
       console.log('⚠️ Không tìm thấy file .aac');
       return res.json({ message: 'Không tìm thấy file .aac' });
     }
   } catch (err) {
     console.error('❌ Lỗi xử lý:', err.message);
-    throw err;
+    throw err; // Thực hiện ném lỗi để bắt lại trong phần `catch` của `processQueue()`
   } finally {
-    console.log('🧾 Đóng trình duyệt\n');
+    console.log('🧾 Đóng tab\n');
     await page.close();
-    await browser.close();
   }
+}
+
+// Hàm chạy OCR với Tesseract.js
+async function runOCR(imageUrl) {
+  return new Promise((resolve, reject) => {
+    // Giả sử bạn tải về ảnh từ mediaUrl trước khi chạy OCR
+    Tesseract.recognize(
+      imageUrl,
+      'eng', // Ngôn ngữ nhận dạng, có thể thay đổi
+      {
+        logger: (m) => console.log(m), // Log quá trình nhận dạng
+      }
+    ).then(({ data: { text } }) => {
+      resolve(text); // Trả về văn bản đã nhận dạng được
+    }).catch((err) => {
+      reject(err);
+    });
+  });
 }
 
 app.listen(PORT, () => {
