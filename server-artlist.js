@@ -30,7 +30,7 @@ async function processQueue() {
 async function initializeBrowser() {
   if (!browser) {
     browser = await puppeteer.launch({
-      headless: true,  // Chạy không có giao diện người dùng
+      headless: false,  // Chạy không có giao diện người dùng
       args: [
         '--start-maximized',
         '--no-sandbox',  // Thêm tham số này để tránh lỗi khi chạy dưới quyền root
