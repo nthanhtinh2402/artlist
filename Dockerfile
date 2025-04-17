@@ -23,4 +23,4 @@ RUN npm install puppeteer --save
 # Sao chép mã nguồn của bạn vào container
 COPY . /app
 
-CMD ["node", "your-script.js"]
+CMD ["node", "server-artlist.js"]
