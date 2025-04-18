@@ -1,15 +1,18 @@
 import express from 'express';
-import puppeteer from 'puppeteer';
-import Tesseract from 'tesseract.js';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
 const app = express();
 const PORT = 3000;
 
+// Kích hoạt plugin stealth
+puppeteer.use(StealthPlugin());
+
 const requestQueue = [];
 let isProcessing = false;
-let browser; // Tạo browser global để tái sử dụng
+let browser = null;
 
-// Hàng đợi xử lý tuần tự
+// Xử lý hàng đợi
 async function processQueue() {
   if (isProcessing || requestQueue.length === 0) return;
 
@@ -19,26 +22,24 @@ async function processQueue() {
   try {
     await handleArtlistRequest(artlistUrl, res);
   } catch (err) {
+    console.error('❌ Lỗi:', err);
     res.status(500).json({ error: err.message });
   } finally {
     isProcessing = false;
-    processQueue(); // Gọi tiếp request tiếp theo
+    processQueue();
   }
 }
 
-// Tạo trình duyệt chỉ khi có yêu cầu đầu tiên
+// Khởi tạo browser mới cho mỗi request
 async function initializeBrowser() {
-  if (!browser) {
-    browser = await puppeteer.launch({
-      headless: false,  // Chạy không có giao diện người dùng
-      args: [
-        '--start-maximized',
-        '--no-sandbox',  // Thêm tham số này để tránh lỗi khi chạy dưới quyền root
-        '--disable-setuid-sandbox', // Thêm tham số này nếu cần thiết
-      ],
-    });
-    console.log('🚀 Puppeteer đã sẵn sàng');
-  }
+  return await puppeteer.launch({
+    headless: true,
+    args: [
+      '--start-maximized',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ],
+  });
 }
 
 // Route API
@@ -50,33 +51,27 @@ app.get('/api.artlist', (req, res) => {
   }
 
   requestQueue.push({ artlistUrl, res });
-  processQueue(); // Xử lý các truy vấn theo hàng đợi
+  processQueue();
 });
 
-// Hàm xử lý một request Artlist
+// Xử lý từng request
 async function handleArtlistRequest(artlistUrl, res) {
   console.log('\n===============================');
-  console.log('🚀 Bắt đầu xử lý URL:', artlistUrl);
+  console.log('🚀 Đang xử lý:', artlistUrl);
 
-  // Khởi tạo trình duyệt nếu chưa có
-  await initializeBrowser();
-
+  browser = await initializeBrowser();
   const page = await browser.newPage();
-  await page.setViewport({
-    width: 390,
-    height: 844,
-    isMobile: true,
-    hasTouch: true,
-  });
 
+  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   await page.setRequestInterception(true);
+
   let mediaUrl = null;
 
   page.on('request', (request) => {
     const url = request.url();
     if (url.includes('.aac')) {
-      console.log('🎵 Bắt được request .aac:', url);
-      if (!mediaUrl) mediaUrl = url; // Lấy mediaUrl đầu tiên gặp phải
+      console.log('🎵 Bắt được .aac:', url);
+      if (!mediaUrl) mediaUrl = url;
     }
     request.continue();
   });
@@ -91,64 +86,42 @@ async function handleArtlistRequest(artlistUrl, res) {
     const clicked = await page.evaluate(() => {
       const firstPlayBtn = document.querySelector('button[aria-label="play global player"]');
       if (firstPlayBtn) {
-        // Giả lập sự kiện hover trước khi click
         firstPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         firstPlayBtn.click();
-        return '▶️ Clicked nút Play (aria-label)';
+        return '▶️ Clicked Play (aria-label)';
       }
 
       const allButtons = [...document.querySelectorAll('button[data-testid="renderButton"]')];
       const secondPlayBtn = allButtons.find(btn => btn.innerText.trim().toLowerCase() === 'play');
       if (secondPlayBtn) {
-        // Giả lập sự kiện hover trước khi click
         secondPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         secondPlayBtn.click();
-        return '▶️ Clicked nút Play (data-testid)';
+        return '▶️ Clicked Play (data-testid)';
       }
 
-      return '⛔ Không tìm thấy nút Play phù hợp';
+      return '⛔ Không tìm thấy nút Play';
     });
 
     console.log(clicked);
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Đợi vài giây để video bắt đầu phát
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Chờ file phát
 
     if (mediaUrl) {
-      console.log('✅ Media URL:', mediaUrl);
-
-      // Nếu muốn dùng OCR để nhận dạng văn bản trong ảnh (ví dụ ảnh chứa captcha, nút, v.v.)
-      const text = await runOCR(mediaUrl);
-      console.log('✅ Kết quả OCR:', text);
-
-      return res.json({ mediaLink: mediaUrl, ocrResult: text });
+      console.log('✅ Link media:', mediaUrl);
+      return res.json({ mediaLink: mediaUrl });
     } else {
       console.log('⚠️ Không tìm thấy file .aac');
-      return res.json({ message: 'Không tìm thấy file .aac' });
+      return res.status(404).json({ message: 'Không tìm thấy file .aac' });
     }
-  } catch (err) {
-    console.error('❌ Lỗi xử lý:', err.message);
-    throw err; // Thực hiện ném lỗi để bắt lại trong phần `catch` của `processQueue()`
-  } finally {
-    console.log('🧾 Đóng tab\n');
-    await page.close();
-  }
-}
 
-// Hàm chạy OCR với Tesseract.js
-async function runOCR(imageUrl) {
-  return new Promise((resolve, reject) => {
-    // Giả sử bạn tải về ảnh từ mediaUrl trước khi chạy OCR
-    Tesseract.recognize(
-      imageUrl,
-      'eng', // Ngôn ngữ nhận dạng, có thể thay đổi
-      {
-        logger: (m) => console.log(m), // Log quá trình nhận dạng
-      }
-    ).then(({ data: { text } }) => {
-      resolve(text); // Trả về văn bản đã nhận dạng được
-    }).catch((err) => {
-      reject(err);
-    });
-  });
+  } catch (err) {
+    console.error('❌ Lỗi trong page:', err.message);
+    throw err;
+  } finally {
+    console.log('🧾 Đóng trình duyệt\n');
+    await page.close();
+    await browser.close();
+    browser = null;
+  }
 }
 
 app.listen(PORT, () => {
