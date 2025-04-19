@@ -35,9 +35,13 @@ async function initializeBrowser() {
   return await puppeteer.launch({
     headless: new,
     args: [
-      '--start-maximized',
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-accelerated-2d-canvas',
+      '--no-zygote',
+      '--disable-software-rasterizer'
     ],
   });
 }
