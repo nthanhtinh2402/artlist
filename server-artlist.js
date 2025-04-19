@@ -5,7 +5,6 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 const app = express();
 const PORT = 3000;
 
-// Kích hoạt plugin stealth
 puppeteer.use(StealthPlugin());
 
 const requestQueue = [];
@@ -30,7 +29,7 @@ async function processQueue() {
   }
 }
 
-// Khởi tạo browser mới cho mỗi request
+// Khởi tạo browser
 async function initializeBrowser() {
   return await puppeteer.launch({
     headless: 'new',
@@ -83,31 +82,36 @@ async function handleArtlistRequest(artlistUrl, res) {
   try {
     await page.goto(artlistUrl, { waitUntil: 'networkidle2' });
 
+    // Tương tác giả để kích hoạt autoplay
+    await page.mouse.move(200, 400);
+    await page.mouse.click(200, 400, { delay: 100 });
+
+    // Click Play bằng Puppeteer
     const selector1 = 'button[aria-label="play global player"]';
     const selector2 = 'button[data-testid="renderButton"] span span';
-    await page.waitForSelector(`${selector1}, ${selector2}`, { timeout: 10000 });
 
-    const clicked = await page.evaluate(() => {
-      const firstPlayBtn = document.querySelector('button[aria-label="play global player"]');
-      if (firstPlayBtn) {
-        firstPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-        firstPlayBtn.click();
-        return '▶️ Clicked Play (aria-label)';
+    try {
+      await page.waitForSelector(selector1, { timeout: 5000 });
+      await page.hover(selector1);
+      await page.click(selector1);
+      console.log('▶️ Đã click nút Play (aria-label)');
+    } catch (e) {
+      try {
+        const button = await page.$x("//button[contains(., 'Play')]");
+        if (button.length > 0) {
+          await button[0].hover();
+          await button[0].click();
+          console.log('▶️ Đã click nút Play (text content)');
+        } else {
+          console.log('⛔ Không tìm thấy nút Play');
+        }
+      } catch (e2) {
+        console.log('⛔ Không thể click nút Play');
       }
+    }
 
-      const allButtons = [...document.querySelectorAll('button[data-testid="renderButton"]')];
-      const secondPlayBtn = allButtons.find(btn => btn.innerText.trim().toLowerCase() === 'play');
-      if (secondPlayBtn) {
-        secondPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-        secondPlayBtn.click();
-        return '▶️ Clicked Play (data-testid)';
-      }
-
-      return '⛔ Không tìm thấy nút Play';
-    });
-
-    console.log(clicked);
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Chờ file phát
+    // Chờ media tải
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     if (mediaUrl) {
       console.log('✅ Link media:', mediaUrl);
