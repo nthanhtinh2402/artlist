@@ -1,0 +1,4 @@
+PORT=3000
+HOST=localhost
+PROTOCOL=http
+API_ROUTE=/api.artlist
