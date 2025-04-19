@@ -33,7 +33,7 @@ async function processQueue() {
 // Khởi tạo browser mới cho mỗi request
 async function initializeBrowser() {
   return await puppeteer.launch({
-    headless: true,
+    headless: false,
     args: [
       '--start-maximized',
       '--no-sandbox',
