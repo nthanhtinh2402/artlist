@@ -116,9 +116,16 @@ async function handleArtlistRequest(artlistUrl, res) {
 
     if (mediaUrl) {
       console.log('✅ Link media:', mediaUrl);
+      // Chờ đến khi đóng trình duyệt mới gửi phản hồi
+      await page.close();
+      await browser.close();
+      browser = null;
       return res.json({ mediaLink: mediaUrl });
     } else {
       console.log('⚠️ Không tìm thấy file .aac');
+      await page.close();
+      await browser.close();
+      browser = null;
       return res.status(404).json({ message: 'Không tìm thấy file .aac' });
     }
 
@@ -126,10 +133,9 @@ async function handleArtlistRequest(artlistUrl, res) {
     console.error('❌ Lỗi trong page:', err.message);
     throw err;
   } finally {
+    // Đảm bảo đóng trình duyệt và trả lại phản hồi chỉ sau khi đã hoàn thành tất cả
     console.log('🧾 Đóng trình duyệt\n');
-    await page.close();
-    await browser.close();
-    browser = null;
+    if (browser) await browser.close();
   }
 }
 
