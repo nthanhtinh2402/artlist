@@ -1,19 +1,18 @@
 import express from 'express';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import Tesseract from 'tesseract.js';
-import sharp from 'sharp';
-import fs from 'fs/promises';
 
 const app = express();
 const PORT = 3000;
 
+// Kích hoạt plugin stealth
 puppeteer.use(StealthPlugin());
 
 const requestQueue = [];
 let isProcessing = false;
 let browser = null;
 
+// Xử lý hàng đợi
 async function processQueue() {
   if (isProcessing || requestQueue.length === 0) return;
 
@@ -31,6 +30,7 @@ async function processQueue() {
   }
 }
 
+// Khởi tạo browser mới cho mỗi request
 async function initializeBrowser() {
   return await puppeteer.launch({
     headless: 'new',
@@ -46,6 +46,7 @@ async function initializeBrowser() {
   });
 }
 
+// Route API
 app.get('/api.artlist', (req, res) => {
   const artlistUrl = req.query.url;
 
@@ -57,35 +58,7 @@ app.get('/api.artlist', (req, res) => {
   processQueue();
 });
 
-async function findAndClickPlayButtonAI(page) {
-  console.log('🔍 Đang tìm nút Play bằng AI...');
-
-  const screenshotBuffer = await page.screenshot();
-
-  const processedImage = await sharp(screenshotBuffer)
-    .resize(800)
-    .grayscale()
-    .toBuffer();
-
-  await fs.writeFile('screen-temp.png', processedImage);
-
-  const { data: { words } } = await Tesseract.recognize('screen-temp.png', 'eng');
-
-  const playWord = words.find(word => /play|▶/i.test(word.text));
-
-  if (playWord) {
-    const x = playWord.bbox.x0 + (playWord.bbox.x1 - playWord.bbox.x0) / 2;
-    const y = playWord.bbox.y0 + (playWord.bbox.y1 - playWord.bbox.y0) / 2;
-
-    console.log(`🎯 Tìm thấy "${playWord.text}" tại (${x}, ${y})`);
-    await page.mouse.click(x, y);
-    return true;
-  }
-
-  console.log('❌ AI không tìm thấy nút Play');
-  return false;
-}
-
+// Xử lý từng request
 async function handleArtlistRequest(artlistUrl, res) {
   console.log('\n===============================');
   console.log('🚀 Đang xử lý:', artlistUrl);
@@ -108,16 +81,21 @@ async function handleArtlistRequest(artlistUrl, res) {
   });
 
   try {
-    await page.goto(artlistUrl, { waitUntil: 'networkidle2' });
+    await page.goto(artlistUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
+    // Chờ nút Play xuất hiện
     const selector1 = 'button[aria-label="play global player"]';
     const selector2 = 'button[data-testid="renderButton"] span span';
-    await page.waitForSelector(`${selector1}, ${selector2}`, { timeout: 10000 });
+    await page.waitForSelector(selector1, { timeout: 10000, visible: true });
+    await page.waitForSelector(selector2, { timeout: 10000, visible: true });
 
+    console.log('🔍 Đang kiểm tra các nút Play...');
+
+    // Kiểm tra và click nút Play
     const clicked = await page.evaluate(() => {
       const firstPlayBtn = document.querySelector('button[aria-label="play global player"]');
       if (firstPlayBtn) {
-        firstPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        console.log('🎮 Đã tìm thấy nút Play (aria-label)');
         firstPlayBtn.click();
         return '▶️ Clicked Play (aria-label)';
       }
@@ -125,7 +103,7 @@ async function handleArtlistRequest(artlistUrl, res) {
       const allButtons = [...document.querySelectorAll('button[data-testid="renderButton"]')];
       const secondPlayBtn = allButtons.find(btn => btn.innerText.trim().toLowerCase() === 'play');
       if (secondPlayBtn) {
-        secondPlayBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        console.log('🎮 Đã tìm thấy nút Play (data-testid)');
         secondPlayBtn.click();
         return '▶️ Clicked Play (data-testid)';
       }
@@ -134,15 +112,7 @@ async function handleArtlistRequest(artlistUrl, res) {
     });
 
     console.log(clicked);
-
-    if (clicked.includes('⛔')) {
-      const aiClicked = await findAndClickPlayButtonAI(page);
-      if (!aiClicked) {
-        return res.status(500).json({ error: 'Không click được nút Play bằng AI' });
-      }
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Chờ phát
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Chờ file phát
 
     if (mediaUrl) {
       console.log('✅ Link media:', mediaUrl);
